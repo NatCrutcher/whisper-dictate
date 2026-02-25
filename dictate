@@ -1,0 +1,59 @@
+#!/bin/bash
+#
+# dictate - toggle voice dictation
+#
+# First invocation starts recording. Second invocation stops recording,
+# transcribes via a local whisper.cpp server, and types the result into
+# the active window via clipboard paste (bracketed paste safe for vim).
+
+PIDFILE="${XDG_RUNTIME_DIR:-/tmp}/dictate.pid"
+WAVFILE="${XDG_RUNTIME_DIR:-/tmp}/dictate.wav"
+SERVER="http://127.0.0.1:8178"
+
+notify() {
+    # First arg is timeout in ms, rest are passed to notify-send.
+    notify-send -t "$1" -a Dictation "${@:2}"
+}
+
+# If currently recording, stop and transcribe
+if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+    kill -INT "$(cat "$PIDFILE")"   # Stop the recording
+    sleep 0.2
+    rm -f "$PIDFILE"
+
+    notify 10000 "Transcribing..."
+
+    if ! RESPONSE=$(curl -sf -X POST "${SERVER}/inference" \
+        -F "file=@${WAVFILE}" \
+        -F "temperature=0.0" \
+        -F "response_format=json"); then
+        notify 2000 "Error" "Whisper server not reachable"
+        rm -f "$WAVFILE"
+        exit 1
+    fi
+
+    rm -f "$WAVFILE"
+
+    TEXT=$(printf '%s' "$RESPONSE" | jq -r '.text // empty' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    if [ -n "$TEXT" ]; then
+        # Paste via clipboard — the terminal emulator wraps this in bracketed
+        # paste escape sequences, so Neovim/vim handle it safely in any mode.
+        wl-copy -- "$TEXT"
+        ydotool key ctrl+shift+v
+        notify 2000 "Done" "$TEXT"
+    else
+        notify 2000 "No speech detected"
+    fi
+else
+    # Clean up any stale state and start recording
+    rm -f "$PIDFILE" "$WAVFILE"
+    pw-record --rate 16000 --channels 1 --format s16 "$WAVFILE" &
+    PID=$!
+    # Detach pw-record from this shell so it isn't killed by SIGHUP when
+    # the script exits. The process keeps recording until the next
+    # invocation sends it SIGINT.
+    disown $PID
+    echo $PID > "$PIDFILE"
+    notify 0 "Recording..."
+fi
