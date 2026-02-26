@@ -8,11 +8,26 @@
 
 PIDFILE="${XDG_RUNTIME_DIR:-/tmp}/dictate.pid"
 WAVFILE="${XDG_RUNTIME_DIR:-/tmp}/dictate.wav"
+NOTIFYFILE="${XDG_RUNTIME_DIR:-/tmp}/dictate.notify"
 SERVER="http://127.0.0.1:8178"
+
+# KDE custom shortcuts launch commands with closed file descriptors.
+# wl-copy aborts if stdin/stdout/stderr aren't open. Ensure they exist.
+exec 0< /dev/null
+exec 1> /dev/null
+exec 2> /dev/null
 
 notify() {
     # First arg is timeout in ms, rest are passed to notify-send.
-    notify-send -t "$1" -a Dictation "${@:2}"
+    # Replaces the previous notification if one exists.
+    local timeout="$1"; shift
+    local replace_arg=()
+    if [ -f "$NOTIFYFILE" ]; then
+        replace_arg=(-r "$(cat "$NOTIFYFILE")")
+    fi
+    local id
+    id=$(notify-send -p -t "$timeout" -a Dictation "${replace_arg[@]}" "$@")
+    echo "$id" > "$NOTIFYFILE"
 }
 
 # If currently recording, stop and transcribe
@@ -40,14 +55,15 @@ if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
         # Paste via clipboard — the terminal emulator wraps this in bracketed
         # paste escape sequences, so Neovim/vim handle it safely in any mode.
         wl-copy -- "$TEXT"
-        ydotool key ctrl+shift+v
-        notify 2000 "Done" "$TEXT"
+        # Ctrl(29)+Shift(42)+V(47) — raw keycodes required by ydotool 1.0+
+        ydotool key 29:1 42:1 47:1 47:0 42:0 29:0
+        notify 4000 "Done" "$TEXT"
     else
         notify 2000 "No speech detected"
     fi
 else
     # Clean up any stale state and start recording
-    rm -f "$PIDFILE" "$WAVFILE"
+    rm -f "$PIDFILE" "$WAVFILE" "$NOTIFYFILE"
     pw-record --rate 16000 --channels 1 --format s16 "$WAVFILE" &
     PID=$!
     # Detach pw-record from this shell so it isn't killed by SIGHUP when

@@ -12,7 +12,7 @@ Code, where vim mode safety matters.
 - **whisper.cpp** built from source with GPU support, including `whisper-server`
   (currently at `~/tools/whisper.cpp/`)
 - A whisper model (currently `ggml-large-v3.bin`)
-- **PipeWire** (for `pw-record`)
+- **PipeWire** (for `pw-record`) to record audio
 - **ydotool** — kernel-level input injection (`sudo apt install ydotool`)
 - **wl-clipboard** — Wayland clipboard access (`wl-copy`)
 - **jq** — JSON parsing

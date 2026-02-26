@@ -1,0 +1,5 @@
+#!/bin/bash
+# Dump environment to a file so we can see what KDE shortcuts provide
+env | sort > /tmp/dictate-env-dump.txt
+echo "wl-copy test" | wl-copy 2>/tmp/dictate-wl-copy-error.txt
+echo "exit code: $?" >> /tmp/dictate-wl-copy-error.txt
