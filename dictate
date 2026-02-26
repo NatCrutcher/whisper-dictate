@@ -55,8 +55,18 @@ now_ms() {
 if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
     T_START=$(now_ms)
 
-    kill -INT "$(cat "$PIDFILE")"   # Stop the recording
-    sleep 0.2
+    RECPID=$(cat "$PIDFILE")
+    kill -INT "$RECPID"
+    # Wait for pw-record to exit and finalize the WAV header.
+    # Typically takes <10ms; timeout after 2s as a safety net.
+    DEADLINE=$(( $(now_ms) + 2000 ))
+    while kill -0 "$RECPID" 2>/dev/null; do
+        if [ "$(now_ms)" -gt "$DEADLINE" ]; then
+            kill -9 "$RECPID" 2>/dev/null
+            break
+        fi
+        sleep 0.005
+    done
     rm -f "$PIDFILE"
 
     T_STOPPED=$(now_ms)
