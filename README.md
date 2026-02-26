@@ -13,7 +13,8 @@ Code, where vim mode safety matters.
   (currently at `~/tools/whisper.cpp/`)
 - A whisper model (currently `ggml-large-v3.bin`)
 - **PipeWire** (for `pw-record`) to record audio
-- **ydotool** — kernel-level input injection (`sudo apt install ydotool`)
+- **ydotool 1.0+** — kernel-level input injection (build from source,
+  see below)
 - **wl-clipboard** — Wayland clipboard access (`wl-copy`)
 - **jq** — JSON parsing
 - **curl**
@@ -21,7 +22,27 @@ Code, where vim mode safety matters.
 
 ## Setup
 
-### 1. ydotool permissions
+### 1. ydotool (build from source)
+
+The Ubuntu/Debian packaged ydotool (v0.1.8) uses an older key syntax
+and lacks the `--mouse-off` flag. Build v1.0+ from source:
+
+```bash
+cd ~/tools
+git clone https://github.com/ReimuNotMoe/ydotool.git
+cd ydotool && mkdir build && cd build
+cmake .. && make -j$(nproc)
+sudo make install
+```
+
+This installs `ydotool` and `ydotoold` to `/usr/local/bin/`. If
+v0.1.8 is installed via apt, remove it to avoid conflicts:
+
+```bash
+sudo apt remove ydotool
+```
+
+#### uinput permissions
 
 ydotool needs access to `/dev/uinput`. Create a udev rule and add
 yourself to the `input` group:
@@ -32,7 +53,36 @@ sudo usermod -aG input $USER
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
+The `udevadm` commands tell the kernel's device manager to re-read
+its rule files and apply them to existing devices, so the permission
+change takes effect immediately rather than requiring a reboot.
+
 **Log out and back in** for the group change to take effect.
+
+#### ydotoold daemon
+
+ydotool 1.0+ requires the `ydotoold` daemon. Enable and start it:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now ydotoold
+```
+
+**Important:** On KDE Plasma Wayland, ydotoold must be started with
+`--mouse-off` to create a keyboard-only virtual device. Without this,
+the device registers as both keyboard and mouse, which can cause
+issues. Create a systemd override:
+
+```bash
+mkdir -p ~/.config/systemd/user/ydotoold.service.d
+cat > ~/.config/systemd/user/ydotoold.service.d/keyboard-only.conf <<'EOF'
+[Service]
+ExecStart=
+ExecStart=/usr/local/bin/ydotoold --mouse-off
+EOF
+systemctl --user daemon-reload
+systemctl --user restart ydotoold
+```
 
 ### 2. Whisper server (systemd user service)
 
@@ -67,6 +117,29 @@ command to `/home/nat/voice/dictate`.
 3. Press the key again — recording stops, a "Transcribing..." notification
    appears, and after ~1-2 seconds the text is pasted into whatever
    window has focus
+
+### Logging
+
+To log timing and transcription data for performance analysis:
+
+```bash
+dictate --log
+```
+
+This appends to `~/voice/dictate.log` with entries like:
+
+```
+--- 2026-02-25T22:20:13-07:00 ---
+audio:     ~2s (39224 bytes)
+stop:      205ms  (kill pw-record + sleep)
+inference: 1823ms  (POST to whisper server)
+paste:     48ms  (wl-copy + ydotool)
+total:     2076ms
+text:      This is a test of the dictation system.
+```
+
+To use logging with a KDE shortcut, set the command to
+`/home/nat/voice/dictate --log`.
 
 ## Theory of operation
 
@@ -130,28 +203,36 @@ focus is in a vim normal-mode buffer.
 `ydotool` was chosen over `wtype` because KDE Plasma's KWin does not
 implement the `zwp_virtual_keyboard_v1` Wayland protocol that wtype
 requires. ydotool bypasses Wayland entirely by injecting events at the
-Linux `/dev/uinput` kernel level.
+Linux `/dev/uinput` kernel level. Version 1.0+ is required for raw
+keycode syntax (`29:1 42:1 47:1 47:0 42:0 29:0` for Ctrl+Shift+V).
 
 ### Notifications
 
-Desktop notifications provide feedback at each stage:
+Desktop notifications provide feedback at each stage. Each
+notification replaces the previous one in-place (using `notify-send
+-p` to capture the ID and `-r` to replace it):
 
 | Stage          | Timeout       |
 |----------------|---------------|
 | Recording...   | persistent    |
 | Transcribing...| 10 seconds    |
-| Done / Error   | 2 seconds     |
+| Done           | 4 seconds     |
+| Error          | 2 seconds     |
 
 ## Notes and issues
+
+- **KDE shortcut closed file descriptors.** KDE custom shortcuts
+  launch commands with stdin/stdout/stderr closed. `wl-copy` aborts if
+  these aren't open. The script works around this by opening
+  `/dev/null` on all three descriptors at startup.
 
 - **Clobbers clipboard.** The paste-based injection overwrites whatever
   is on the Wayland clipboard. This is an accepted trade-off for vim
   safety.
 
-- **ydotool keyboard layout.** ydotool v0.1.8 assumes a QWERTY
-  layout for `ydotool type`. This doesn't affect us since we only use
-  `ydotool key` to press Ctrl+Shift+V — modifier + letter combos work
-  regardless of layout.
+- **ydotool keyboard layout.** ydotool 1.0+ uses raw keycodes, so
+  keyboard layout doesn't matter for our use case — we only press
+  Ctrl+Shift+V by keycode.
 
 - **Ctrl+Shift+V is terminal-specific.** This paste shortcut works in
   Konsole, Kitty, Alacritty, WezTerm, and most modern terminal
@@ -164,7 +245,9 @@ Desktop notifications provide feedback at each stage:
   This is a safety net — `pw-record` already outputs the correct
   format (16kHz 16-bit mono WAV), but `--convert` handles edge cases
   like truncated WAV headers if `pw-record` is killed at an unlucky
-  moment.
+  moment. This adds latency (ffmpeg fork+exec per request). If
+  performance is a priority and recordings are reliable, consider
+  removing `--convert` from the service file.
 
 - **Temp files.** The WAV recording and PID file are stored in
   `$XDG_RUNTIME_DIR` (typically `/run/user/$UID/`), a RAM-backed tmpfs

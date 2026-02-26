@@ -5,17 +5,34 @@
 # First invocation starts recording. Second invocation stops recording,
 # transcribes via a local whisper.cpp server, and types the result into
 # the active window via clipboard paste (bracketed paste safe for vim).
+#
+# Usage: dictate [--log]
+#   --log  Write timing and response data to ~/voice/dictate.log
 
 PIDFILE="${XDG_RUNTIME_DIR:-/tmp}/dictate.pid"
 WAVFILE="${XDG_RUNTIME_DIR:-/tmp}/dictate.wav"
 NOTIFYFILE="${XDG_RUNTIME_DIR:-/tmp}/dictate.notify"
 SERVER="http://127.0.0.1:8178"
+LOGFILE="$HOME/voice/dictate.log"
+
+LOG=false
+for arg in "$@"; do
+    case "$arg" in
+        --log) LOG=true ;;
+    esac
+done
 
 # KDE custom shortcuts launch commands with closed file descriptors.
 # wl-copy aborts if stdin/stdout/stderr aren't open. Ensure they exist.
 exec 0< /dev/null
 exec 1> /dev/null
 exec 2> /dev/null
+
+log() {
+    if $LOG; then
+        printf '%s\n' "$*" >> "$LOGFILE"
+    fi
+}
 
 notify() {
     # First arg is timeout in ms, rest are passed to notify-send.
@@ -30,13 +47,25 @@ notify() {
     echo "$id" > "$NOTIFYFILE"
 }
 
+now_ms() {
+    date +%s%3N
+}
+
 # If currently recording, stop and transcribe
 if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+    T_START=$(now_ms)
+
     kill -INT "$(cat "$PIDFILE")"   # Stop the recording
     sleep 0.2
     rm -f "$PIDFILE"
 
+    T_STOPPED=$(now_ms)
+
     notify 10000 "Transcribing..."
+
+    AUDIO_SIZE=$(stat -c%s "$WAVFILE" 2>/dev/null || echo 0)
+    # 16kHz × 16-bit × mono = 32000 bytes/sec, plus 44-byte WAV header
+    AUDIO_SECS=$(( (AUDIO_SIZE - 44) / 32000 ))
 
     if ! RESPONSE=$(curl -sf -X POST "${SERVER}/inference" \
         -F "file=@${WAVFILE}" \
@@ -44,8 +73,13 @@ if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
         -F "response_format=json"); then
         notify 2000 "Error" "Whisper server not reachable"
         rm -f "$WAVFILE"
+        log "--- $(date -Iseconds) ---"
+        log "ERROR: whisper server not reachable"
+        log ""
         exit 1
     fi
+
+    T_RESPONSE=$(now_ms)
 
     rm -f "$WAVFILE"
 
@@ -57,10 +91,21 @@ if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
         wl-copy -- "$TEXT"
         # Ctrl(29)+Shift(42)+V(47) — raw keycodes required by ydotool 1.0+
         ydotool key 29:1 42:1 47:1 47:0 42:0 29:0
+        T_PASTED=$(now_ms)
         notify 4000 "Done" "$TEXT"
     else
+        T_PASTED=$(now_ms)
         notify 2000 "No speech detected"
     fi
+
+    log "--- $(date -Iseconds) ---"
+    log "audio:     ~${AUDIO_SECS}s (${AUDIO_SIZE} bytes)"
+    log "stop:      $(( T_STOPPED - T_START ))ms  (kill pw-record + sleep)"
+    log "inference: $(( T_RESPONSE - T_STOPPED ))ms  (POST to whisper server)"
+    log "paste:     $(( T_PASTED - T_RESPONSE ))ms  (wl-copy + ydotool)"
+    log "total:     $(( T_PASTED - T_START ))ms"
+    log "text:      ${TEXT:-<empty>}"
+    log ""
 else
     # Clean up any stale state and start recording
     rm -f "$PIDFILE" "$WAVFILE" "$NOTIFYFILE"
@@ -72,4 +117,7 @@ else
     disown $PID
     echo $PID > "$PIDFILE"
     notify 0 "Recording..."
+    log "--- $(date -Iseconds) ---"
+    log "recording started (pid $PID)"
+    log ""
 fi
