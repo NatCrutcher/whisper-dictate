@@ -111,6 +111,31 @@ Bind a key to `~/voice/dictate` in your desktop environment.
 new → Command/URL. Set the trigger to your preferred key and the
 command to `/home/nat/voice/dictate`.
 
+#### Using numpad keys with input-remapper
+
+KDE's custom shortcuts don't reliably capture numpad keys (like
+KP_Enter or KP_Plus). **input-remapper** works around this by
+remapping numpad keys to unused keycodes that KDE can bind:
+
+```bash
+sudo apt install input-remapper
+```
+
+In the input-remapper GUI, create mappings from numpad keys to
+uncommon keycodes (e.g. KP_Enter → F13, KP_Plus → F14, KP_Minus →
+F15, KP_Multiply → F16), then bind those keycodes in KDE's custom
+shortcuts. input-remapper runs as a systemd service and applies
+mappings at login.
+
+Current bindings:
+
+| Numpad key | KDE shortcut command             | Action                          |
+|------------|----------------------------------|---------------------------------|
+| Enter      | `dictate --log`                  | Copy/paste with post-processing |
+| +          | `dictate --log copy`             | Copy only with post-processing  |
+| −          | `dictate --log discard`          | Cancel recording                |
+| *          | `dictate --log --raw`            | Copy/paste without post-processing |
+
 ## Usage
 
 ```
@@ -184,25 +209,17 @@ To use logging with a KDE shortcut, set the command to
 
 ### Architecture
 
-```
-┌──────────────┐    on login     ┌─────────────────────┐
-│ systemd user │───────────────▶│ whisper-server       │
-│ service      │                │ (model on GPU, idle) │
-└──────────────┘                └──────┬──────────────┘
-                                       │ localhost:8178
-                                       │
-┌──────────────┐   POST /inference     │
-│ dictate      │──────────────────────▶│
-│ (bash script)│◀──────────────────────│
-└──────┬───────┘   JSON {text: "..."}
-       │
-       │  pipe through postprocess (Python)
-       │
-       │  wl-copy + ydotool Ctrl+Shift+V
-       ▼
-┌──────────────┐
-│ active window│
-└──────────────┘
+```mermaid
+graph TD
+    S[systemd user services] -->|on login| B[whisper-server<br/>model on GPU, idle]
+    S -->|on login| Y[ydotoold<br/>/dev/uinput]
+    C[dictate<br/>bash script] -->|POST /inference<br/>localhost:8178| B
+    B -->|JSON text| C
+    C -->|pipe stdin/stdout| D[postprocess<br/>Python]
+    D --> C
+    C -->|wl-copy| CL[Wayland clipboard]
+    C -->|ydotool Ctrl+Shift+V| Y
+    Y -->|key event| E[active window]
 ```
 
 ### Why a persistent server?
