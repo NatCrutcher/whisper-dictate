@@ -16,7 +16,7 @@ Code, where vim mode safety matters.
 - **ydotool 1.0+** — kernel-level input injection (build from source,
   see below)
 - **wl-clipboard** — Wayland clipboard access (`wl-copy`)
-- **jq** — JSON parsing
+- **jq** — JSON parsing for Whisper output cleanup
 - **curl**
 - **Python 3** — post-processing (stdlib only, no pip packages)
 - **notify-send** (libnotify) — desktop notifications
@@ -54,9 +54,7 @@ sudo usermod -aG input $USER
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
-The `udevadm` commands tell the kernel's device manager to re-read
-its rule files and apply them to existing devices, so the permission
-change takes effect immediately rather than requiring a reboot.
+The `udevadm` commands tell the kernel's device manager to re-read its rule files and apply them to existing devices, so the permission change takes effect immediately rather than requiring a reboot.
 
 **Log out and back in** for the group change to take effect.
 
@@ -129,17 +127,19 @@ mappings at login.
 
 Current bindings:
 
-| Numpad key | KDE shortcut command             | Action                          |
-|------------|----------------------------------|---------------------------------|
-| Enter      | `dictate --log`                  | Copy/paste with post-processing |
-| +          | `dictate --log copy`             | Copy only with post-processing  |
-| −          | `dictate --log discard`          | Cancel recording                |
-| *          | `dictate --log --raw`            | Copy/paste without post-processing |
+| Numpad<br/>Key | Remapped<br/>Key | KDE<br/>Name | KDE Shortcut Command           | Action                          |
+|------------|----------------------------------|---------------------------------|---------------------------------|---------------------------------|
+| Enter      |      | Enter | `dictate --log`                  | Copy/paste with post-processing |
+| +          | F13  | Tools | `dictate --log copy`             | Copy only with post-processing  |
+| −          | F14 | Launch (7) | `dictate --log discard`          | Cancel recording                |
+| *          | F15 | Launch (8) | `dictate --log --raw`            | Copy/paste without post-processing |
+| .<br/>Del | F16 | Launch (9) | `dictate --log flush` | End chunk, copy/paste with<br/>post-processing, keep recording |
+| 0<br/>Ins | F17 | Launch (A) | `dictate --log --no-suffix` | Copy/paste with post-processing,<br/>but without adding a period and space. |
 
 ## Usage
 
 ```
-dictate [--log] [--raw] [discard|copy|copypaste]
+dictate [--log] [--raw] [--no-suffix] [discard|copy|copypaste|flush]
 ```
 
 ### Action modes
@@ -148,6 +148,7 @@ dictate [--log] [--raw] [discard|copy|copypaste]
 |-------------|----------------------------------------|---------------------|
 | `copypaste` | Transcribe → copy → paste (default)    | Start recording     |
 | `copy`      | Transcribe → copy to clipboard only    | Start recording     |
+| `flush`     | End chunk, paste, keep recording       | Start recording     |
 | `discard`   | Stop and discard recording             | No-op               |
 
 ### Basic workflow
@@ -180,6 +181,8 @@ Transcriptions are piped through the `postprocess` script which:
 If post-processing fails, the raw whisper output is used as a fallback.
 Use `--raw` to skip post-processing entirely and get the raw whisper
 output.
+
+**See the script for the definitive list of edits.**
 
 ### Logging
 

@@ -6,14 +6,18 @@
 # transcribes via a local whisper.cpp server, and types the result into
 # the active window via clipboard paste (bracketed paste safe for vim).
 #
-# Usage: dictate [--log] [--raw] [discard|copy|copypaste]
-#   --log      Write timing and response data to ~/voice/dictate.log
-#   --raw      Skip post-processing, use raw whisper output
-#   discard    If recording, stop and discard. If not recording, do nothing.
-#   copy       If recording, transcribe and copy to clipboard (no paste).
-#              If not recording, start recording.
-#   copypaste  (default) If recording, transcribe, copy, and paste.
-#              If not recording, start recording.
+# Usage: dictate [--log] [--raw] [--no-suffix] [discard|copy|copypaste|flush]
+#   --log        Write timing and response data to ~/voice/dictate.log
+#   --raw        Skip post-processing, use raw whisper output
+#   --no-suffix  Don't append trailing punctuation/space on flush
+#   discard      If recording, stop and discard. If not recording, do nothing.
+#   copy         If recording, transcribe and copy to clipboard (no paste).
+#                If not recording, start recording.
+#   copypaste    (default) If recording, transcribe, copy, and paste.
+#                If not recording, start recording.
+#   flush        If recording, end chunk, start new recording, transcribe and
+#                paste the chunk. Appends ". " if no sentence-ending punctuation.
+#                If not recording, start recording.
 
 PIDFILE="${XDG_RUNTIME_DIR:-/tmp}/dictate.pid"
 WAVFILE="${XDG_RUNTIME_DIR:-/tmp}/dictate.wav"
@@ -24,12 +28,14 @@ SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 
 LOG=false
 RAW=false
+SUFFIX=true
 ACTION=copypaste
 for arg in "$@"; do
     case "$arg" in
         --log) LOG=true ;;
         --raw) RAW=true ;;
-        discard|copy|copypaste) ACTION="$arg" ;;
+        --no-suffix) SUFFIX=false ;;
+        discard|copy|copypaste|flush) ACTION="$arg" ;;
     esac
 done
 
@@ -66,8 +72,8 @@ now_ms() {
 if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
     T_START=$(now_ms)
 
-    RECPID=$(cat "$PIDFILE")
-    kill -INT "$RECPID"
+    RECPID=$(cat "$PIDFILE")   # Process ID of the .wav recording process
+    kill -INT "$RECPID"        # Send a signal to stop the recording
     # Wait for pw-record to exit and finalize the WAV header.
     # Typically takes <10ms; timeout after 2s as a safety net.
     DEADLINE=$(( $(now_ms) + 2000 ))
@@ -92,18 +98,34 @@ if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
         exit 0
     fi
 
+    # Rename WAV to a per-process temp file so multiple invocations
+    # (e.g. rapid flushes) can transcribe concurrently without collisions.
+    TRANSCRIBE_WAV="${WAVFILE}.$$"
+    mv "$WAVFILE" "$TRANSCRIBE_WAV"
+
+    if [ "$ACTION" = "flush" ]; then
+        # Start a new recording immediately so that we don't lose any audio.
+        pw-record --rate 16000 --channels 1 --format s16 "$WAVFILE" &
+        NEWPID=$!            # $! is the PID of the pw-record process
+        disown $NEWPID       # This ensures pw-record will keep running after this process exits
+        echo $NEWPID > "$PIDFILE"
+        notify 0 "Recording..."
+    fi
+
     notify 10000 "Transcribing..."
 
-    AUDIO_SIZE=$(stat -c%s "$WAVFILE" 2>/dev/null || echo 0)
+    # Compute some values for the log file.
+    AUDIO_SIZE=$(stat -c%s "$TRANSCRIBE_WAV" 2>/dev/null || echo 0)
     # 16kHz × 16-bit × mono = 32000 bytes/sec, plus 44-byte WAV header
     AUDIO_SECS=$(( (AUDIO_SIZE - 44) / 32000 ))
 
+    # Start the transcription with Whisper.
     if ! RESPONSE=$(curl -sf -X POST "${SERVER}/inference" \
-        -F "file=@${WAVFILE}" \
+        -F "file=@${TRANSCRIBE_WAV}" \
         -F "temperature=0.0" \
         -F "response_format=json"); then
         notify 2000 "Error" "Whisper server not reachable"
-        rm -f "$WAVFILE"
+        rm -f "$TRANSCRIBE_WAV"
         log "--- $(date -Iseconds) [$ACTION] ---"
         log "ERROR: whisper server not reachable"
         log ""
@@ -112,19 +134,38 @@ if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
 
     T_RESPONSE=$(now_ms)
 
-    rm -f "$WAVFILE"
+    rm -f "$TRANSCRIBE_WAV"
 
     RAW_TEXT=$(printf '%s' "$RESPONSE" | jq -r '.text // empty')
     if $RAW; then
+        # Strip leading and trailing whitespace from raw whisper output.
         TEXT=$(printf '%s' "$RAW_TEXT" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     else
-        TEXT=$(printf '%s' "$RAW_TEXT" | python3 "${SCRIPT_DIR}/postprocess") || TEXT="$RAW_TEXT"
+        if ! TEXT=$(printf '%s' "$RAW_TEXT" | python3 "${SCRIPT_DIR}/postprocess"); then
+            log "WARNING: postprocess failed, falling back to raw text"
+            TEXT="$RAW_TEXT"
+        fi
+    fi
+
+    # --no-suffix: strip trailing period that whisper tends to add.
+    if ! $SUFFIX && [ -n "$TEXT" ]; then
+        TEXT="${TEXT%.}"
+    fi
+
+    # Flush keeps recording, so the next chunk will paste right after this one.
+    # Append sentence-ending punctuation and a space to separate chunks.
+    # If text already ends with . ! or ?, just add a space; otherwise add ". ".
+    if [ "$ACTION" = "flush" ] && $SUFFIX && [ -n "$TEXT" ]; then
+        case "$TEXT" in
+            *.|*!|*\?) TEXT="$TEXT " ;;
+            *) TEXT="$TEXT. " ;;
+        esac
     fi
 
     if [ -n "$TEXT" ]; then
-        wl-copy -- "$TEXT"
+        wl-copy -n -- "$TEXT"
 
-        if [ "$ACTION" = "copypaste" ]; then
+        if [ "$ACTION" = "copypaste" ] || [ "$ACTION" = "flush" ]; then
             # Paste via clipboard — the terminal emulator wraps this in
             # bracketed paste escape sequences, so Neovim/vim handle it
             # safely in any mode.
@@ -148,8 +189,8 @@ if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
     log "inference: $(( T_RESPONSE - T_STOPPED ))ms  (POST to whisper server)"
     log "done:      $(( T_DONE - T_RESPONSE ))ms  (wl-copy + ydotool)"
     log "total:     $(( T_DONE - T_START ))ms"
-    log "raw:       ${RAW_TEXT:-<empty>}"
-    log "text:      ${TEXT:-<empty>}"
+    log "raw:      |${RAW_TEXT:-<empty>}|"
+    log "text:     |${TEXT:-<empty>}|"
     log ""
 else
     # Not recording — discard is a no-op
