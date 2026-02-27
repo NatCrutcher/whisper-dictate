@@ -107,7 +107,7 @@ Bind a key to `~/voice/dictate` in your desktop environment.
 
 **KDE Plasma:** System Settings → Shortcuts → Custom Shortcuts → Add
 new → Command/URL. Set the trigger to your preferred key and the
-command to `/home/nat/voice/dictate`.
+command to `~/voice/dictate`.
 
 #### Using numpad keys with input-remapper
 
@@ -206,7 +206,7 @@ text:      This is a test of the dictation system.
 ```
 
 To use logging with a KDE shortcut, set the command to
-`/home/nat/voice/dictate --log`.
+`~/voice/dictate --log`.
 
 ## Theory of operation
 

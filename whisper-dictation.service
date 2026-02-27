@@ -2,9 +2,10 @@
 Description=Whisper.cpp transcription server
 
 [Service]
-ExecStart=/home/nat/tools/whisper.cpp/build/bin/whisper-server \
-    -m /home/nat/tools/whisper.cpp/models/ggml-large-v3.bin \
-    --host 127.0.0.1 \
+# Adjust paths below to match your whisper.cpp install location.
+ExecStart=%h/tools/whisper.cpp/build/bin/whisper-server \
+    -m %h/tools/whisper.cpp/models/ggml-large-v3.bin \
+    --host localhost \
     --port 8178 \
     -l en \
     --convert \

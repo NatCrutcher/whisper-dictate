@@ -22,7 +22,7 @@
 PIDFILE="${XDG_RUNTIME_DIR:-/tmp}/dictate.pid"
 WAVFILE="${XDG_RUNTIME_DIR:-/tmp}/dictate.wav"
 NOTIFYFILE="${XDG_RUNTIME_DIR:-/tmp}/dictate.notify"
-SERVER="http://127.0.0.1:8178"
+SERVER="http://localhost:8178"
 LOGFILE="$HOME/voice/dictate.log"
 SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 
