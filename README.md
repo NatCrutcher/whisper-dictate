@@ -17,7 +17,7 @@ Code, where vim mode safety matters.
   see below)
 - **wl-clipboard** — Wayland clipboard access (`wl-copy`)
 - **jq** — JSON parsing for Whisper output cleanup
-- **curl**
+- **curl** — sends audio to the whisper server for transcription
 - **Python 3** — post-processing (stdlib only, no pip packages)
 - **notify-send** (libnotify) — desktop notifications
 
