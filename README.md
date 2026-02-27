@@ -18,6 +18,7 @@ Code, where vim mode safety matters.
 - **wl-clipboard** — Wayland clipboard access (`wl-copy`)
 - **jq** — JSON parsing
 - **curl**
+- **Python 3** — post-processing (stdlib only, no pip packages)
 - **notify-send** (libnotify) — desktop notifications
 
 ## Setup
@@ -112,11 +113,48 @@ command to `/home/nat/voice/dictate`.
 
 ## Usage
 
+```
+dictate [--log] [--raw] [discard|copy|copypaste]
+```
+
+### Action modes
+
+| Action      | While recording                        | While not recording |
+|-------------|----------------------------------------|---------------------|
+| `copypaste` | Transcribe → copy → paste (default)    | Start recording     |
+| `copy`      | Transcribe → copy to clipboard only    | Start recording     |
+| `discard`   | Stop and discard recording             | No-op               |
+
+### Basic workflow
+
 1. Press your dictation key — a "Recording..." notification appears
 2. Speak
 3. Press the key again — recording stops, a "Transcribing..." notification
    appears, and after ~1-2 seconds the text is pasted into whatever
    window has focus
+
+Bind separate keys for `discard` and `copy` to quickly cancel a
+recording or grab text without pasting.
+
+### Post-processing
+
+Transcriptions are piped through the `postprocess` script which:
+
+- **Suppresses hallucinations** — whisper outputs "Thank you." on
+  silence; these are detected and suppressed
+- **Fixes word corrections** — "clawed code" → "Claude Code", etc.
+- **Converts spoken commands** — "new line" inserts a newline
+- **Casing commands** — "camel get user end" → `getUser`, "snake
+  my var end" → `my_var`, "all caps max size end" → `MAX_SIZE`,
+  "quote hello world end quote" → `"hello world"`
+- **Spoken punctuation** — "period" → `.`, "comma" → `,`, "question
+  mark" → `?`, "colon" → `:`, "dash" → ` -- `, etc.
+- **Capitalizes sentences** — uppercase after `.!?` and at start
+- **Cleans whitespace** — collapses extra spaces and newlines
+
+If post-processing fails, the raw whisper output is used as a fallback.
+Use `--raw` to skip post-processing entirely and get the raw whisper
+output.
 
 ### Logging
 
@@ -129,12 +167,13 @@ dictate --log
 This appends to `~/voice/dictate.log` with entries like:
 
 ```
---- 2026-02-25T22:20:13-07:00 ---
+--- 2026-02-25T22:20:13-07:00 [copypaste] ---
 audio:     ~2s (39224 bytes)
 stop:      205ms  (kill pw-record + sleep)
 inference: 1823ms  (POST to whisper server)
-paste:     48ms  (wl-copy + ydotool)
+done:      48ms  (wl-copy + ydotool)
 total:     2076ms
+raw:        This is a test of the dictation system.
 text:      This is a test of the dictation system.
 ```
 
@@ -156,6 +195,8 @@ To use logging with a KDE shortcut, set the command to
 │ dictate      │──────────────────────▶│
 │ (bash script)│◀──────────────────────│
 └──────┬───────┘   JSON {text: "..."}
+       │
+       │  pipe through postprocess (Python)
        │
        │  wl-copy + ydotool Ctrl+Shift+V
        ▼
@@ -217,6 +258,8 @@ notification replaces the previous one in-place (using `notify-send
 | Recording...   | persistent    |
 | Transcribing...| 10 seconds    |
 | Done           | 4 seconds     |
+| Copied         | 4 seconds     |
+| Discarded      | 2 seconds     |
 | Error          | 2 seconds     |
 
 ## Notes and issues

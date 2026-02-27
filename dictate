@@ -6,19 +6,30 @@
 # transcribes via a local whisper.cpp server, and types the result into
 # the active window via clipboard paste (bracketed paste safe for vim).
 #
-# Usage: dictate [--log]
-#   --log  Write timing and response data to ~/voice/dictate.log
+# Usage: dictate [--log] [--raw] [discard|copy|copypaste]
+#   --log      Write timing and response data to ~/voice/dictate.log
+#   --raw      Skip post-processing, use raw whisper output
+#   discard    If recording, stop and discard. If not recording, do nothing.
+#   copy       If recording, transcribe and copy to clipboard (no paste).
+#              If not recording, start recording.
+#   copypaste  (default) If recording, transcribe, copy, and paste.
+#              If not recording, start recording.
 
 PIDFILE="${XDG_RUNTIME_DIR:-/tmp}/dictate.pid"
 WAVFILE="${XDG_RUNTIME_DIR:-/tmp}/dictate.wav"
 NOTIFYFILE="${XDG_RUNTIME_DIR:-/tmp}/dictate.notify"
 SERVER="http://127.0.0.1:8178"
 LOGFILE="$HOME/voice/dictate.log"
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 
 LOG=false
+RAW=false
+ACTION=copypaste
 for arg in "$@"; do
     case "$arg" in
         --log) LOG=true ;;
+        --raw) RAW=true ;;
+        discard|copy|copypaste) ACTION="$arg" ;;
     esac
 done
 
@@ -51,7 +62,7 @@ now_ms() {
     date +%s%3N
 }
 
-# If currently recording, stop and transcribe
+# If currently recording, stop and handle action
 if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
     T_START=$(now_ms)
 
@@ -71,6 +82,16 @@ if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
 
     T_STOPPED=$(now_ms)
 
+    # Discard: throw away recording, no transcription
+    if [ "$ACTION" = "discard" ]; then
+        rm -f "$WAVFILE"
+        notify 2000 "Discarded"
+        log "--- $(date -Iseconds) [$ACTION] ---"
+        log "discarded after $(( T_STOPPED - T_START ))ms"
+        log ""
+        exit 0
+    fi
+
     notify 10000 "Transcribing..."
 
     AUDIO_SIZE=$(stat -c%s "$WAVFILE" 2>/dev/null || echo 0)
@@ -83,7 +104,7 @@ if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
         -F "response_format=json"); then
         notify 2000 "Error" "Whisper server not reachable"
         rm -f "$WAVFILE"
-        log "--- $(date -Iseconds) ---"
+        log "--- $(date -Iseconds) [$ACTION] ---"
         log "ERROR: whisper server not reachable"
         log ""
         exit 1
@@ -93,30 +114,49 @@ if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
 
     rm -f "$WAVFILE"
 
-    TEXT=$(printf '%s' "$RESPONSE" | jq -r '.text // empty' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    RAW_TEXT=$(printf '%s' "$RESPONSE" | jq -r '.text // empty')
+    if $RAW; then
+        TEXT=$(printf '%s' "$RAW_TEXT" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    else
+        TEXT=$(printf '%s' "$RAW_TEXT" | python3 "${SCRIPT_DIR}/postprocess") || TEXT="$RAW_TEXT"
+    fi
 
     if [ -n "$TEXT" ]; then
-        # Paste via clipboard — the terminal emulator wraps this in bracketed
-        # paste escape sequences, so Neovim/vim handle it safely in any mode.
         wl-copy -- "$TEXT"
-        # Ctrl(29)+Shift(42)+V(47) — raw keycodes required by ydotool 1.0+
-        ydotool key 29:1 42:1 47:1 47:0 42:0 29:0
-        T_PASTED=$(now_ms)
-        notify 4000 "Done" "$TEXT"
+
+        if [ "$ACTION" = "copypaste" ]; then
+            # Paste via clipboard — the terminal emulator wraps this in
+            # bracketed paste escape sequences, so Neovim/vim handle it
+            # safely in any mode.
+            # Ctrl(29)+Shift(42)+V(47) — raw keycodes required by ydotool 1.0+
+            ydotool key 29:1 42:1 47:1 47:0 42:0 29:0
+            T_DONE=$(now_ms)
+            notify 4000 "Done" "$TEXT"
+        else
+            # copy: clipboard only, no paste
+            T_DONE=$(now_ms)
+            notify 4000 "Copied" "$TEXT"
+        fi
     else
-        T_PASTED=$(now_ms)
+        T_DONE=$(now_ms)
         notify 2000 "No speech detected"
     fi
 
-    log "--- $(date -Iseconds) ---"
+    log "--- $(date -Iseconds) [$ACTION] ---"
     log "audio:     ~${AUDIO_SECS}s (${AUDIO_SIZE} bytes)"
     log "stop:      $(( T_STOPPED - T_START ))ms  (kill pw-record + sleep)"
     log "inference: $(( T_RESPONSE - T_STOPPED ))ms  (POST to whisper server)"
-    log "paste:     $(( T_PASTED - T_RESPONSE ))ms  (wl-copy + ydotool)"
-    log "total:     $(( T_PASTED - T_START ))ms"
+    log "done:      $(( T_DONE - T_RESPONSE ))ms  (wl-copy + ydotool)"
+    log "total:     $(( T_DONE - T_START ))ms"
+    log "raw:       ${RAW_TEXT:-<empty>}"
     log "text:      ${TEXT:-<empty>}"
     log ""
 else
+    # Not recording — discard is a no-op
+    if [ "$ACTION" = "discard" ]; then
+        exit 0
+    fi
+
     # Clean up any stale state and start recording
     rm -f "$PIDFILE" "$WAVFILE" "$NOTIFYFILE"
     pw-record --rate 16000 --channels 1 --format s16 "$WAVFILE" &
@@ -127,7 +167,7 @@ else
     disown $PID
     echo $PID > "$PIDFILE"
     notify 0 "Recording..."
-    log "--- $(date -Iseconds) ---"
+    log "--- $(date -Iseconds) [$ACTION] ---"
     log "recording started (pid $PID)"
     log ""
 fi

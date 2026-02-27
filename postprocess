@@ -1,0 +1,214 @@
+#!/usr/bin/env python3
+"""Post-process whisper transcription output.
+
+Reads text from stdin, applies corrections, writes to stdout.
+No external dependencies — stdlib only.
+"""
+
+import re
+import sys
+
+# --- Hallucination suppression ---
+# Whisper outputs these on silence or background noise. They are deleted 
+# if they match the entire content.
+HALLUCINATIONS = {
+#    "",
+    "Thank you.",
+#    "Thanks for watching.",
+#    "Thanks for watching!",
+#    "Thank you for watching.",
+#    "Thank you for watching!",
+    "you",
+    "You",
+    "Bye.",
+    "Bye!",
+    "Bye-bye.",
+    "...",
+    ".",
+    "Oh.",
+    "Hmm.",
+    "Huh.",
+    "Ugh.",
+    "Ah.",
+    "So.",
+    "The end.",
+}
+
+# --- Word corrections ---
+# (pattern, replacement) — patterns use word boundaries, case-insensitive.
+WORD_CORRECTIONS = [
+    (r"\bclawed\s+code\b", "Claude Code"),
+    (r"\bcloud\s+code\b", "Claude Code"),
+    (r"\bclaude\s+code\b", "Claude Code"),  # fix casing
+    (r"\bclawed\b", "Claude"),
+#    (r"\bclawd\b", "Claude"),
+#    (r"\banthopic\b", "Anthropic"),
+    (r"\banthropic\b", "Anthropic"),  # fix casing
+    (r"\bGitHub\b", "GitHub"),  # already correct but ensures casing
+]
+
+# --- Spoken punctuation ---
+# Multi-word patterns first, then single-word.
+PUNCTUATION = [
+#    (r"\bquestion mark\b,?", "?"),
+#    (r"\bexclamation mark\b,?", "!"),
+    (r"\bexclamation point\b,?", "!"),
+    (r"\bopen paren\b,?", "("),
+    (r"\bclose paren\b,?", ")"),
+#    (r"\bperiod\b,?", "."),
+    (r"\bcomma\b,?", ","),
+#    (r"\bcolon\b,?", ":"),
+    (r"\bsemicolon\b,?", ";"),
+#    (r"\bellipsis\b,?", "..."),
+#    (r"\bdash\b,?", " -- "),
+    (r"\bhyphen\b,?", "-"),
+]
+
+
+def suppress_hallucinations(text: str) -> str:
+    if text in HALLUCINATIONS:
+        return ""
+    return text
+
+
+def apply_word_corrections(text: str) -> str:
+    for pattern, replacement in WORD_CORRECTIONS:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return text
+
+
+def convert_newlines(text: str) -> str:
+    # Whisper often wraps "new line" in commas: ", new line," — consume them.
+    return re.sub(r",?\s*\bnew\s*line\b\s*,?", "\n", text, flags=re.IGNORECASE)
+
+
+def convert_dots(text: str) -> str:
+    # "foo dot bar" → "foo.bar" (for code identifiers like module.name)
+    return re.sub(r"(\w)\s+dot\s+(\w)", r"\1.\2", text, flags=re.IGNORECASE)
+
+
+def apply_casing_commands(text: str) -> str:
+    """Convert voice commands like 'camel foo bar end' to 'fooBar'."""
+
+    def camel_case(words):
+        return words[0].lower() + "".join(w.capitalize() for w in words[1:])
+
+    def snake_case(words):
+        return "_".join(w.lower() for w in words)
+
+    def all_caps(words):
+        return "_".join(w.upper() for w in words)
+
+    def quote_words(words):
+        return '"' + " ".join(words) + '"'
+
+    # (command trigger, function, terminator pattern)
+    commands = [
+        ("all caps", all_caps, "end"),
+        ("camel", camel_case, "end"),
+        ("snake", snake_case, "end"),
+        ("quote", quote_words, r"end\s+quote"),
+    ]
+
+    # Whisper often inserts commas between spoken words and may add a
+    # period after "end", e.g. "All caps, max size, end." — allow
+    # optional commas/periods around the trigger, body, and terminator.
+    SEP = r"[,\s]+"  # comma-or-whitespace separator
+    for cmd, func, terminator in commands:
+        pattern = re.compile(
+            r"\b" + re.escape(cmd) + SEP + r"(.+?)" + SEP + terminator + r"\b\.?",
+            re.IGNORECASE,
+        )
+        while True:
+            match = pattern.search(text)
+            if not match:
+                break
+            # Strip commas from captured words
+            words = [w.strip(",") for w in match.group(1).split() if w.strip(",")]
+            if words:
+                replacement = func(words)
+                text = text[: match.start()] + replacement + text[match.end() :]
+    return text
+
+
+def apply_punctuation(text: str) -> str:
+    for pattern, replacement in PUNCTUATION:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+
+    # Clean spacing around punctuation: remove space before, ensure space after
+    # (unless at end of string or followed by another punctuation mark).
+    text = re.sub(r"\s+([.,?!:;])", r"\1", text)
+    # Add space after punctuation before letters — but not dots, which
+    # may be code identifiers (foo.bar) from the "dot" voice command.
+    text = re.sub(r"([,?!:;])([A-Za-z])", r"\1 \2", text)
+    return text
+
+
+def capitalize_sentences(text: str) -> str:
+    if not text:
+        return text
+    # Capitalize start of text, but not if it's a code identifier
+    # (camelCase has uppercase letters, snake_case has underscores)
+    if text[0].islower():
+        first_word = re.match(r"\S+", text)
+        if not first_word or (
+            not any(c.isupper() for c in first_word.group())
+            and "_" not in first_word.group()
+            and "." not in first_word.group()
+        ):
+            text = text[0].upper() + text[1:]
+    # Capitalize after sentence-ending punctuation + whitespace
+    text = re.sub(
+        r"([.!?]\s+)([a-z])",
+        lambda m: m.group(1) + m.group(2).upper(),
+        text,
+    )
+    # Capitalize after newlines
+    text = re.sub(
+        r"(\n\s*)([a-z])",
+        lambda m: m.group(1) + m.group(2).upper(),
+        text,
+    )
+    return text
+
+
+def clean_whitespace(text: str) -> str:
+    # Collapse multiple spaces to one
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    # Strip trailing whitespace on each line
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    # Strip leading whitespace after newlines
+    text = re.sub(r"\n[ \t]+", "\n", text)
+    # Collapse 3+ newlines to 2
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def postprocess(text: str) -> str:
+    text = text.strip()
+
+    text = suppress_hallucinations(text)
+    if not text:
+        return ""
+
+    # Whisper inserts arbitrary newlines — flatten to spaces so they
+    # don't interfere with pattern matching. The "new line" voice
+    # command reintroduces intentional newlines later.
+    text = text.replace("\n", " ")
+
+    text = apply_word_corrections(text)
+    text = convert_newlines(text)
+    text = convert_dots(text)
+    text = apply_casing_commands(text)
+    text = apply_punctuation(text)
+    text = capitalize_sentences(text)
+    text = clean_whitespace(text)
+
+    return text
+
+
+if __name__ == "__main__":
+    raw = sys.stdin.read()
+    result = postprocess(raw)
+    sys.stdout.write(result)
+
