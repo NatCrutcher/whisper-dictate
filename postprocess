@@ -137,10 +137,13 @@ def apply_punctuation(text: str) -> str:
 
     # Clean spacing around punctuation: remove space before, ensure space after
     # (unless at end of string or followed by another punctuation mark).
-    text = re.sub(r"\s+([.,?!:;])", r"\1", text)
+    text = re.sub(r"\s+([.,?!:;)])", r"\1", text)
     # Add space after punctuation before letters — but not dots, which
     # may be code identifiers (foo.bar) from the "dot" voice command.
     text = re.sub(r"([,?!:;])([A-Za-z])", r"\1 \2", text)
+    # Clean up parens: remove space after (, space/comma before )
+    text = re.sub(r"\(\s+", "(", text)
+    text = re.sub(r"[,\s]+\)", ")", text)
     return text
 
 
