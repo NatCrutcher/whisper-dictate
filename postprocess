@@ -50,7 +50,7 @@ WORD_CORRECTIONS = [
 # --- Spoken punctuation ---
 # Multi-word patterns first, then single-word.
 PUNCTUATION = [
-#    (r"\bquestion mark\b,?", "?"),
+    (r"\bquestion mark\b[,?]?", "?"),
 #    (r"\bexclamation mark\b,?", "!"),
     (r"\bexclamation point\b,?", "!"),
     (r"\bopen paren\b,?", "("),
@@ -59,7 +59,7 @@ PUNCTUATION = [
     (r"\bclose bracket\b,?", "]"),
     (r"\bopen curly\b,?", "{"),
     (r"\bclose curly\b,?", "}"),
-#    (r"\bperiod\b,?", "."),
+    (r"\bperiod\b[,.]?", "."),
     (r"\bcomma\b,?", ","),
 #    (r"\bcolon\b,?", ":"),
     (r"\bsemicolon\b,?", ";"),
@@ -148,6 +148,11 @@ def apply_punctuation(text: str) -> str:
     # Clean up parens: remove space after (, space/comma before )
     text = re.sub(r"\(\s+", "(", text)
     text = re.sub(r"[,\s]+\)", ")", text)
+    # Collapse doubled punctuation — Whisper sometimes echoes punctuation
+    # it already converted (e.g., "period." → "..", ", comma" → ",,")
+    text = re.sub(r"\.{2,}", ".", text)
+    text = re.sub(r",{2,}", ",", text)
+    text = re.sub(r"\?{2,}", "?", text)
     return text
 
 
