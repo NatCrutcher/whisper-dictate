@@ -49,23 +49,24 @@ WORD_CORRECTIONS = [
 
 # --- Spoken punctuation ---
 # Multi-word patterns first, then single-word.
+LITERAL_PREFIX = r"(?<!literal )"
 PUNCTUATION = [
-    (r"\bquestion mark\b[,?]?", "?"),
-#    (r"\bexclamation mark\b,?", "!"),
-    (r"\bexclamation point\b,?", "!"),
-    (r"\bopen paren\b,?", "("),
-    (r"\bclose paren\b,?", ")"),
-    (r"\bopen bracket\b,?", "["),
-    (r"\bclose bracket\b,?", "]"),
-    (r"\bopen curly\b,?", "{"),
-    (r"\bclose curly\b,?", "}"),
-    (r"\bperiod\b[,.]?", "."),
-    (r"\bcomma\b,?", ","),
-#    (r"\bcolon\b,?", ":"),
-    (r"\bsemicolon\b,?", ";"),
-#    (r"\bellipsis\b,?", "..."),
-#    (r"\bdash\b,?", " -- "),
-    (r"\bhyphen\b,?", "-"),
+    (LITERAL_PREFIX + r"\bquestion mark\b[,?]?", "?"),
+#    (LITERAL_PREFIX + r"\bexclamation mark\b,?", "!"),
+    (LITERAL_PREFIX + r"\bexclamation point\b,?", "!"),
+    (LITERAL_PREFIX + r"\bopen paren\b,?", "("),
+    (LITERAL_PREFIX + r"\bclose paren\b,?", ")"),
+    (LITERAL_PREFIX + r"\bopen bracket\b,?", "["),
+    (LITERAL_PREFIX + r"\bclose bracket\b,?", "]"),
+    (LITERAL_PREFIX + r"\bopen curly\b,?", "{"),
+    (LITERAL_PREFIX + r"\bclose curly\b,?", "}"),
+    (LITERAL_PREFIX + r"\bperiod\b[,.]?", "."),
+    (LITERAL_PREFIX + r"\bcomma\b,?", ","),
+#    (LITERAL_PREFIX + r"\bcolon\b,?", ":"),
+    (LITERAL_PREFIX + r"\bsemicolon\b,?", ";"),
+#    (LITERAL_PREFIX + r"\bellipsis\b,?", "..."),
+#    (LITERAL_PREFIX + r"\bdash\b,?", " -- "),
+    (LITERAL_PREFIX + r"\bhyphen\b,?", "-"),
 ]
 
 
@@ -139,6 +140,14 @@ def apply_punctuation(text: str) -> str:
     for pattern, replacement in PUNCTUATION:
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
 
+    # Strip "literal" prefix, leaving the spoken punctuation word as-is
+    text = re.sub(
+        r"\bliteral (question mark|exclamation point|open paren|close paren"
+        r"|open bracket|close bracket|open curly|close curly"
+        r"|period|comma|semicolon|hyphen)\b",
+        r"\1", text, flags=re.IGNORECASE,
+    )
+
     # Clean spacing around punctuation: remove space before, ensure space after
     # (unless at end of string or followed by another punctuation mark).
     text = re.sub(r"\s+([.,?!:;)])", r"\1", text)
@@ -148,15 +157,10 @@ def apply_punctuation(text: str) -> str:
     # Clean up parens: remove space after (, space/comma before )
     text = re.sub(r"\(\s+", "(", text)
     text = re.sub(r"[,\s]+\)", ")", text)
-    # Collapse doubled punctuation — Whisper sometimes echoes punctuation
-    # it already converted (e.g., "period." → "..", ", comma" → ",,")
-    text = re.sub(r"\.{2,}", ".", text)
-    text = re.sub(r",{2,}", ",", text)
-    text = re.sub(r"\?{2,}", "?", text)
-    # Drop comma before sentence-ending punctuation (",." → ".", ",?" → "?")
-    text = re.sub(r",([.?!])", r"\1", text)
-    # Drop period after stronger sentence-ending punctuation ("?." → "?")
-    text = re.sub(r"([?!])\.", r"\1", text)
+    # Collapse doubled punctuation (e.g., ".." → ".", ",," → ",")
+    text = re.sub(r"([.,?!])\1+", r"\1", text)
+    # Drop weaker mark adjacent to stronger end mark (",." → ".", "?." → "?")
+    text = re.sub(r"[,.]+(?=[.?!])|(?<=[?!])\.+", "", text)
     return text
 
 
