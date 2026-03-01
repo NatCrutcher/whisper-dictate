@@ -12,25 +12,18 @@ import sys
 # Whisper outputs these on silence or background noise. They are deleted 
 # if they match the entire content.
 HALLUCINATIONS = {
-#    "",
     "Thank you.",
 #    "Thanks for watching.",
 #    "Thanks for watching!",
 #    "Thank you for watching.",
 #    "Thank you for watching!",
-    "you",
-    "You",
-    "Bye.",
-    "Bye!",
+    "you", "You",
+    "Bye.", "Bye!",
     "Bye-bye.",
-    "...",
-    ".",
-    "Oh.",
-    "Hmm.",
-    "Huh.",
-    "Ugh.",
-    "Ah.",
-    "So.",
+    "...", ".",
+    "Oh.", "Hmm.",
+    "Huh.", "Ugh.",
+    "Ah.", "So.",
     "The end.",
 }
 
@@ -48,11 +41,14 @@ WORD_CORRECTIONS = [
 ]
 
 # --- Spoken punctuation ---
-# Multi-word patterns first, then single-word.
+# Negative lookbehind: skip conversion when preceded by "literal"
+# so "literal period" keeps the word instead of becoming "."
 LITERAL_PREFIX = r"(?<!literal )"
+
+# Multi-word patterns first, then single-word.
 PUNCTUATION = [
     (LITERAL_PREFIX + r"\bquestion mark\b[,?]?", "?"),
-#    (LITERAL_PREFIX + r"\bexclamation mark\b,?", "!"),
+# I don't use this.    (LITERAL_PREFIX + r"\bexclamation mark\b,?", "!"),
     (LITERAL_PREFIX + r"\bexclamation point\b,?", "!"),
     (LITERAL_PREFIX + r"\bopen paren\b,?", "("),
     (LITERAL_PREFIX + r"\bclose paren\b,?", ")"),
@@ -62,10 +58,10 @@ PUNCTUATION = [
     (LITERAL_PREFIX + r"\bclose curly\b,?", "}"),
     (LITERAL_PREFIX + r"\bperiod\b[,.]?", "."),
     (LITERAL_PREFIX + r"\bcomma\b,?", ","),
-#    (LITERAL_PREFIX + r"\bcolon\b,?", ":"),
+# So far, Whisper handles this.    (LITERAL_PREFIX + r"\bcolon\b,?", ":"),
     (LITERAL_PREFIX + r"\bsemicolon\b,?", ";"),
 #    (LITERAL_PREFIX + r"\bellipsis\b,?", "..."),
-#    (LITERAL_PREFIX + r"\bdash\b,?", " -- "),
+# I don't use this.    (LITERAL_PREFIX + r"\bdash\b,?", " -- "),
     (LITERAL_PREFIX + r"\bhyphen\b,?", "-"),
 ]
 
