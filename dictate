@@ -45,6 +45,13 @@ exec 0< /dev/null
 exec 1> /dev/null
 exec 2> /dev/null
 
+# Detach from the KDE shortcut launcher. Without this, finished dictate
+# processes linger as zombies because the launcher never reaps them.
+if [ -z "$_DICTATE_DETACHED" ]; then
+    _DICTATE_DETACHED=1 setsid "$0" "$@" &
+    exit 0
+fi
+
 log() {
     if $LOG; then
         printf '%s\n' "$*" >> "$LOGFILE"

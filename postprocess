@@ -48,7 +48,7 @@ LITERAL_PREFIX = r"(?<!literal )"
 # Multi-word patterns first, then single-word.
 PUNCTUATION = [
     (LITERAL_PREFIX + r"\bquestion mark\b[,?]?", "?"),
-# I don't use this.    (LITERAL_PREFIX + r"\bexclamation mark\b,?", "!"),
+    (LITERAL_PREFIX + r"\bexclamation mark\b,?", "!"),
     (LITERAL_PREFIX + r"\bexclamation point\b,?", "!"),
     (LITERAL_PREFIX + r"\bopen paren\b,?", "("),
     (LITERAL_PREFIX + r"\bclose paren\b,?", ")"),
@@ -105,9 +105,9 @@ def apply_casing_commands(text: str) -> str:
 
     # (command trigger, function, terminator pattern)
     commands = [
-        ("all caps", all_caps, "end"),
-        ("camel", camel_case, "end"),
-        ("snake", snake_case, "end"),
+        ("all caps", all_caps, "(end|and)"),
+        ("camel", camel_case, "(end|and)"),
+        ("snake", snake_case, "(end|and)"),
         ("quote", quote_words, r"end\s+quote"),
     ]
 
@@ -219,6 +219,11 @@ def postprocess(text: str) -> str:
     text = apply_punctuation(text)
     text = capitalize_sentences(text)
     text = clean_whitespace(text)
+
+    # Add trailing space after final punctuation so the next dictation
+    # chunk starts after a natural word boundary.
+    if text and text[-1] in ".!?":
+        text += " "
 
     return text
 
