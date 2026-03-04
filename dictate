@@ -164,7 +164,7 @@ if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
     # If text already ends with . ! or ?, just add a space; otherwise add ". ".
     if [ "$ACTION" = "flush" ] && $SUFFIX && [ -n "$TEXT" ]; then
         case "$TEXT" in
-            *.|*!|*\?) TEXT="$TEXT " ;;
+            *.|*!|*\?|*". "|*"! "|*"? ") TEXT="$TEXT" ;;
             *) TEXT="$TEXT. " ;;
         esac
     fi

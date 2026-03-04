@@ -37,6 +37,7 @@ WORD_CORRECTIONS = [
 #    (r"\bclawd\b", "Claude"),
 #    (r"\banthopic\b", "Anthropic"),
     (r"\banthropic\b", "Anthropic"),  # fix casing
+    (r"\bKama\b", "comma"),
     (r"\bGitHub\b", "GitHub"),  # already correct but ensures casing
 ]
 
@@ -47,6 +48,7 @@ LITERAL_PREFIX = r"(?<!literal )"
 
 # Multi-word patterns first, then single-word.
 PUNCTUATION = [
+    (LITERAL_PREFIX + r"\bdouble hash sign\b,?", "##"),
     (LITERAL_PREFIX + r"\bquestion mark\b[,?]?", "?"),
     (LITERAL_PREFIX + r"\bexclamation mark\b,?", "!"),
     (LITERAL_PREFIX + r"\bexclamation point\b,?", "!"),
@@ -56,9 +58,12 @@ PUNCTUATION = [
     (LITERAL_PREFIX + r"\bclose bracket\b,?", "]"),
     (LITERAL_PREFIX + r"\bopen curly\b,?", "{"),
     (LITERAL_PREFIX + r"\bclose curly\b,?", "}"),
+    (LITERAL_PREFIX + r"\bhash sign\b,?", "#"),
+    (LITERAL_PREFIX + r"\bdouble octothorpe\b,?", "##"),
+    (LITERAL_PREFIX + r"\boctothorpe\b,?", "#"),
     (LITERAL_PREFIX + r"\bperiod\b[,.]?", "."),
     (LITERAL_PREFIX + r"\bcomma\b,?", ","),
-# So far, Whisper handles this.    (LITERAL_PREFIX + r"\bcolon\b,?", ":"),
+    (LITERAL_PREFIX + r"\bcolon\b,?", ":"),
     (LITERAL_PREFIX + r"\bsemicolon\b,?", ";"),
 #    (LITERAL_PREFIX + r"\bellipsis\b,?", "..."),
 # I don't use this.    (LITERAL_PREFIX + r"\bdash\b,?", " -- "),
@@ -139,7 +144,7 @@ def apply_punctuation(text: str) -> str:
     # Strip "literal" prefix, leaving the spoken punctuation word as-is
     text = re.sub(
         r"\bliteral (question mark|exclamation point|open paren|close paren"
-        r"|open bracket|close bracket|open curly|close curly"
+        r"|open bracket|close bracket|open curly|close curly|octothorpe|hash sign"
         r"|period|comma|semicolon|hyphen)\b",
         r"\1", text, flags=re.IGNORECASE,
     )
