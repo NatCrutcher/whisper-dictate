@@ -68,6 +68,7 @@ PUNCTUATION = [
 #    (LITERAL_PREFIX + r"\bellipsis\b,?", "..."),
 # I don't use this.    (LITERAL_PREFIX + r"\bdash\b,?", " -- "),
     (LITERAL_PREFIX + r"\bhyphen\b,?", "-"),
+    (LITERAL_PREFIX + r"\bslash\b,?", "/"),
 ]
 
 
@@ -109,17 +110,22 @@ def apply_casing_commands(text: str) -> str:
         return '"' + " ".join(words) + '"'
 
     # (command trigger, function, terminator pattern)
+    def upper_camel_case(words):
+        return "".join(w.capitalize() for w in words)
+
+    # (command trigger, function, terminator pattern)
     commands = [
         ("all caps", all_caps, "(end|and)"),
+        ("upper camel", upper_camel_case, "(end|and)"),
         ("camel", camel_case, "(end|and)"),
         ("snake", snake_case, "(end|and)"),
         ("quote", quote_words, r"end\s+quote"),
     ]
 
-    # Whisper often inserts commas between spoken words and may add a
-    # period after "end", e.g. "All caps, max size, end." — allow
-    # optional commas/periods around the trigger, body, and terminator.
-    SEP = r"[,\s]+"  # comma-or-whitespace separator
+    # Whisper often inserts commas or periods between spoken words,
+    # e.g. "All caps, max size, end." or "Upper camel. Get name. End."
+    # Allow optional commas, periods, and whitespace as separators.
+    SEP = r"[,.\s]+"
     for cmd, func, terminator in commands:
         pattern = re.compile(
             r"\b" + re.escape(cmd) + SEP + r"(.+?)" + SEP + terminator + r"\b\.?",
@@ -129,8 +135,8 @@ def apply_casing_commands(text: str) -> str:
             match = pattern.search(text)
             if not match:
                 break
-            # Strip commas from captured words
-            words = [w.strip(",") for w in match.group(1).split() if w.strip(",")]
+            # Strip commas and periods from captured words
+            words = [w.strip(",.") for w in match.group(1).split() if w.strip(",.")]
             if words:
                 replacement = func(words)
                 text = text[: match.start()] + replacement + text[match.end() :]
@@ -145,13 +151,15 @@ def apply_punctuation(text: str) -> str:
     text = re.sub(
         r"\bliteral (question mark|exclamation point|open paren|close paren"
         r"|open bracket|close bracket|open curly|close curly|octothorpe|hash sign"
-        r"|period|comma|semicolon|hyphen)\b",
+        r"|period|comma|semicolon|hyphen|slash)\b",
         r"\1", text, flags=re.IGNORECASE,
     )
 
     # Clean spacing around punctuation: remove space before, ensure space after
     # (unless at end of string or followed by another punctuation mark).
     text = re.sub(r"\s+([.,?!:;)])", r"\1", text)
+    # Remove spaces around slashes (for paths like home/documents/file)
+    text = re.sub(r"\s*/\s*", "/", text)
     # Add space after punctuation before letters — but not dots, which
     # may be code identifiers (foo.bar) from the "dot" voice command.
     text = re.sub(r"([,?!:;])([A-Za-z])", r"\1 \2", text)
@@ -205,7 +213,7 @@ def clean_whitespace(text: str) -> str:
     return text.strip()
 
 
-def postprocess(text: str) -> str:
+def postprocess(text: str, phrase: bool = False) -> str:
     text = text.strip()
 
     text = suppress_hallucinations(text)
@@ -222,19 +230,36 @@ def postprocess(text: str) -> str:
     text = convert_dots(text)
     text = apply_casing_commands(text)
     text = apply_punctuation(text)
-    text = capitalize_sentences(text)
+    if not phrase:
+        text = capitalize_sentences(text)
     text = clean_whitespace(text)
 
-    # Add trailing space after final punctuation so the next dictation
-    # chunk starts after a natural word boundary.
-    if text and text[-1] in ".!?":
-        text += " "
+    if phrase:
+        # Lowercase the first letter (whisper capitalizes ~80% of the time),
+        # but not if the first word is a code identifier (camelCase, has
+        # underscores, dots, or slashes).
+        if text and text[0].isupper():
+            first_word = re.match(r"\S+", text)
+            word = first_word.group() if first_word else ""
+            if not any(c.isupper() for c in word[1:]) and not re.search(r"[_./]", word):
+                text = text[0].lower() + text[1:]
+        # Suppress trailing period that whisper adds, but keep ! and ?
+        text = text.rstrip(". ")
+        # Ensure trailing space for word boundary
+        if text:
+            text += " "
+    else:
+        # Add trailing space after final punctuation so the next dictation
+        # chunk starts after a natural word boundary.
+        if text and text[-1] in ".!?":
+            text += " "
 
     return text
 
 
 if __name__ == "__main__":
+    phrase = "--phrase" in sys.argv
     raw = sys.stdin.read()
-    result = postprocess(raw)
+    result = postprocess(raw, phrase=phrase)
     sys.stdout.write(result)
 

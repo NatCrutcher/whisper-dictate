@@ -6,10 +6,11 @@
 # transcribes via a local whisper.cpp server, and types the result into
 # the active window via clipboard paste (bracketed paste safe for vim).
 #
-# Usage: dictate [--log] [--raw] [--no-suffix] [discard|copy|copypaste|flush]
+# Usage: dictate [--log] [--raw] [--no-suffix] [--phrase] [discard|copy|copypaste|flush]
 #   --log        Write timing and response data to ~/voice/dictate.log
 #   --raw        Skip post-processing, use raw whisper output
 #   --no-suffix  Don't append trailing punctuation/space on flush
+#   --phrase     Lowercase first letter, no trailing period, add trailing space
 #   discard      If recording, stop and discard. If not recording, do nothing.
 #   copy         If recording, transcribe and copy to clipboard (no paste).
 #                If not recording, start recording.
@@ -29,12 +30,14 @@ SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 LOG=false
 RAW=false
 SUFFIX=true
+PHRASE=false
 ACTION=copypaste
 for arg in "$@"; do
     case "$arg" in
         --log) LOG=true ;;
         --raw) RAW=true ;;
         --no-suffix) SUFFIX=false ;;
+        --phrase) PHRASE=true ;;
         discard|copy|copypaste|flush) ACTION="$arg" ;;
     esac
 done
@@ -148,7 +151,9 @@ if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
         # Strip leading and trailing whitespace from raw whisper output.
         TEXT=$(printf '%s' "$RAW_TEXT" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     else
-        if ! TEXT=$(printf '%s' "$RAW_TEXT" | python3 "${SCRIPT_DIR}/postprocess"); then
+        POSTPROCESS_ARGS=()
+        if $PHRASE; then POSTPROCESS_ARGS+=(--phrase); fi
+        if ! TEXT=$(printf '%s' "$RAW_TEXT" | python3 "${SCRIPT_DIR}/postprocess" "${POSTPROCESS_ARGS[@]}"); then
             log "WARNING: postprocess failed, falling back to raw text"
             TEXT="$RAW_TEXT"
         fi

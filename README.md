@@ -130,7 +130,7 @@ Current bindings:
 | Numpad<br/>Key | Remapped<br/>Key | KDE<br/>Name | KDE Shortcut Command           | Action                          |
 |------------|----------------------------------|---------------------------------|---------------------------------|---------------------------------|
 | Enter      |      | Enter | `dictate --log`                  | Copy/paste with post-processing |
-| +          | F13  | Tools | `dictate --log copy`             | Copy only with post-processing  |
+| +          | F13  | Tools | `dictate --log --phrase`     | Copy/paste with post-processing, but skip leading char capitalization and trailing period. |
 | −          | F14 | Launch (7) | `dictate --log discard`          | Cancel recording                |
 | *          | F15 | Launch (8) | `dictate --log --raw`            | Copy/paste without post-processing |
 | .<br/>Del | F16 | Launch (9) | `dictate --log flush` | End chunk, copy/paste with<br/>post-processing, keep recording |
@@ -139,7 +139,7 @@ Current bindings:
 ## Usage
 
 ```
-dictate [--log] [--raw] [--no-suffix] [discard|copy|copypaste|flush]
+dictate [--log] [--raw] [--no-suffix] [--phrase] [discard|copy|copypaste|flush]
 ```
 
 ### Action modes
@@ -162,6 +162,13 @@ dictate [--log] [--raw] [--no-suffix] [discard|copy|copypaste|flush]
 Bind separate keys for `discard` and `copy` to quickly cancel a
 recording or grab text without pasting.
 
+### Phrase mode
+
+Use `--phrase` for inserting text mid-sentence (e.g. variable names,
+short phrases). This suppresses first-letter capitalization, omits the
+trailing period that whisper tends to add, and ensures a trailing
+space.
+
 ### Post-processing
 
 Transcriptions are piped through the `postprocess` script which:
@@ -170,11 +177,14 @@ Transcriptions are piped through the `postprocess` script which:
   silence; these are detected and suppressed
 - **Fixes word corrections** — "clawed code" → "Claude Code", etc.
 - **Converts spoken commands** — "new line" inserts a newline
-- **Casing commands** — "camel get user end" → `getUser`, "snake
-  my var end" → `my_var`, "all caps max size end" → `MAX_SIZE`,
+- **Casing commands** — "camel get user end" → `getUser`, "upper
+  camel my class end" → `MyClass`, "snake my var end" → `my_var`,
+  "all caps max size end" → `MAX_SIZE`,
   "quote hello world end quote" → `"hello world"`
 - **Spoken punctuation** — "period" → `.`, "comma" → `,`, "question
-  mark" → `?`, "colon" → `:`, "dash" → ` -- `, etc.
+  mark" → `?`, "colon" → `:`, "slash" → `/`, etc.
+  Prefix with "literal" to insert the word instead (e.g. "literal
+  slash" → `slash`)
 - **Capitalizes sentences** — uppercase after `.!?` and at start
 - **Cleans whitespace** — collapses extra spaces and newlines
 
@@ -317,6 +327,8 @@ notification replaces the previous one in-place (using `notify-send
   that is cleaned up on logout.
 
 ## Future enhancements
+
+### Lower Priority
 
 - **Save/restore clipboard.** Snapshot the clipboard before dictation
   and restore it after pasting, to avoid clobbering.
